@@ -1,0 +1,35 @@
+# .github/workflows/main.yml
+name: EAS Build (Android APK)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⚙️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🛠 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: 🏗 Setup Expo and EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          # This secret is required for EAS to authenticate your account
+          expo-token: ${{ secrets.EXPO_TOKEN }} 
+          eas-version: latest
+          
+      - name: ⬇️ Install dependencies
+        run: npm install
+
+      - name: 📦 Trigger EAS Android Build
+        run: |
+          # The 'production' profile in eas.json will be used
+          eas build --platform android --profile production --non-interactive --local-config --wait
