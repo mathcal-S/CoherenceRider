@@ -1,25 +1,133 @@
 name: Build CoherenceRider APK
 
+# Trigger on push or PR to main
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
+# Ensure only one build runs at a time per branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-android-apk:
+    name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}  # Recommended: Use token, not password
+      EXPO_USERNAME: ${{ secrets.EXPO_USERNAME }}
+      EXPO_PASSWORD: ${{ secrets.EXPO_PASSWORD }}
+      IBM_TOKEN: ${{ secrets.IBM_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      INFURA_URL: ${{ secrets.INFURA_URL }}
+      PINATA_JWT: ${{ secrets.PINATA_JWT }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
-          node-version: 20
-      - run: npm install
-      - run: npm install -g expo-cli
-      - run: expo login --username ${{ secrets.EXPO_USERNAME }} --password ${{ secrets.EXPO_PASSWORD }}
-      - run: expo build:android -t apk
-      - uses: actions/upload-artifact@v4
+          fetch-depth: 0  # Needed for PR context
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: apk
-          path: '*.apk'
-          retention-days: 7
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+          echo "Dependencies installed"
+
+      - name: Install EAS CLI (Latest)
+        run: |
+          npm install -g eas-cli@latest
+          eas --version
+
+      - name: Configure EAS (Auto-setup eas.json if missing)
+        run: |
+          eas build:configure --non-interactive || echo "eas.json already configured or minor issue"
+
+      - name: Login to Expo (Using Token if available, else username/password)
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "Logging in with EXPO_TOKEN..."
+            echo "$EXPO_TOKEN" > ~/.expo_token
+            eas whoami
+          elif [ -n "$EXPO_USERNAME" ] && [ -n "$EXPO_PASSWORD" ]; then
+            echo "Logging in with username/password..."
+            eas login --username "$EXPO_USERNAME" --password "$EXPO_PASSWORD" --non-interactive
+          else
+            echo "Error: No Expo credentials provided!"
+            exit 1
+          fi
+
+      - name: Validate eas.json Profile
+        run: |
+          if ! grep -q '"production"' eas.json; then
+            echo "Warning: 'production' profile not found in eas.json. Creating minimal fallback..."
+            cat > eas.json << 'EOF'
+          {
+            "cli": { "version": ">= 12.0.0" },
+            "build": {
+              "production": {
+                "android": { "buildType": "apk" }
+              }
+            }
+          }
+          EOF
+          fi
+
+      - name: Build Android APK (Production)
+        id: build
+        run: |
+          echo "Starting EAS build for Android APK..."
+          BUILD_ID=$(eas build \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --no-wait \
+            --json | jq -r '.id')
+          
+          echo "Build ID: $BUILD_ID"
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          
+          # Poll for completion
+          echo "Waiting for build to complete..."
+          eas build:wait --id $BUILD_ID --non-interactive
+
+      - name: Download Built APK
+        if: success()
+        run: |
+          BUILD_ID=$(cat $GITHUB_OUTPUT | grep build_id | cut -d= -f2)
+          echo "Downloading APK from build $BUILD_ID..."
+          eas build:download \
+            --id $BUILD_ID \
+            --platform android \
+            --non-interactive \
+            --path coherencerider-oracle.apk
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoherenceRider-Oracle-APK
+          path: coherencerider-oracle.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- **APK**: Available in Artifacts" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Failed**: Check logs above" >> $GITHUB_STEP_SUMMARY
+          fi
