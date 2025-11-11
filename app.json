@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "CoherenceRider Oracle",
+    "slug": "coherencerider-oracle",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {"resizeMode": "contain", "backgroundColor": "#1a1a1a"},
+    "assetBundlePatterns": ["**/*"],
+    "ios": {"supportsTablet": true},
+    "android": {"adaptiveIcon": {"foregroundImage": "./assets/icon.png"}},
+    "plugins": ["expo-sensors", "expo-location", "expo-camera", "expo-media-library"]
+  }
+}
